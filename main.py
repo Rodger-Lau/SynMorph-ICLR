@@ -79,7 +79,7 @@ lambda_complexity = config['train']['lambda_complexity']
 
 task_index = 0
 task_dim = config['train']['task_dim']
-TASK_CODE_DIM = task_dim + 4  # one-hot (2) + spatial (2) + temporal (2)
+TASK_CODE_DIM = task_dim + 4
 
 class_num = 3
 assert task_dim == 2
