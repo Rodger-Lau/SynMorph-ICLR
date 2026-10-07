@@ -92,7 +92,6 @@ def build_task_code(task_index, X, adj_matrix):
     if adj.shape[0] != x.shape[2] or adj.shape[1] != x.shape[2]:
         raise ValueError(f"Adjacency/X node mismatch: {adj.shape} vs {x.shape}")
 
-    # Eq. (4): normalized topology-aware propagation with self-loops.
     a = adj + np.eye(adj.shape[0], dtype=np.float32)
     degree = a.sum(axis=1, keepdims=True)
     a_norm = a / np.maximum(degree, 1e-6)
