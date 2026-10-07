@@ -84,19 +84,36 @@ TASK_CODE_DIM = task_dim + 4  # one-hot (2) + spatial (2) + temporal (2)
 class_num = 3
 assert task_dim == 2
 
-def build_task_code(task_index, node_num, seq_len, horizon, tpd, adj_matrix):
-    """Build [task one-hot, spatial statistics, temporal statistics]."""
+def build_task_code(task_index, X, adj_matrix):
+    x = np.asarray(X, dtype=np.float32)
+    if x.ndim != 4:
+        raise ValueError(f"Expected X with shape [B,T,N,F], got {x.shape}")
+    adj = np.asarray(adj_matrix, dtype=np.float32)
+    if adj.shape[0] != x.shape[2] or adj.shape[1] != x.shape[2]:
+        raise ValueError(f"Adjacency/X node mismatch: {adj.shape} vs {x.shape}")
+
+    # Eq. (4): normalized topology-aware propagation with self-loops.
+    a = adj + np.eye(adj.shape[0], dtype=np.float32)
+    degree = a.sum(axis=1, keepdims=True)
+    a_norm = a / np.maximum(degree, 1e-6)
+    propagated = np.einsum("ij,btjf->btif", a_norm, x)
+    spatial = np.array([
+        np.mean(np.abs(propagated)),
+        np.std(propagated),
+    ], dtype=np.float32)
+    spectrum = np.abs(np.fft.rfft(x, axis=1))
+    frequencies = np.fft.rfftfreq(x.shape[1], d=1.0)
+    spectral_strength = spectrum.mean(axis=(0, 2, 3))
+    if spectral_strength.shape[0] > 1:
+        dominant_idx = 1 + int(np.argmax(spectral_strength[1:]))
+    else:
+        dominant_idx = 0
+    omega_max = float(frequencies[dominant_idx])
+    f_max = float(spectral_strength[dominant_idx])
+    temporal = np.array([omega_max, f_max], dtype=np.float32)
+
     one_hot = np.zeros(task_dim, dtype=np.float32)
     one_hot[int(task_index)] = 1.0
-    adj = np.asarray(adj_matrix, dtype=np.float32)
-    spatial = np.array([
-        min(float(node_num) / 1000.0, 1.0),
-        float(np.count_nonzero(adj)) / max(float(adj.size), 1.0),
-    ], dtype=np.float32)
-    temporal = np.array([
-        min(float(seq_len) / max(float(tpd), 1.0), 1.0),
-        min(float(horizon) / max(float(tpd), 1.0), 1.0),
-    ], dtype=np.float32)
     return np.concatenate([one_hot, spatial, temporal])
 
 
@@ -224,7 +241,6 @@ def run_task(task_index, shared_controller=None):
             for k in range(5):
                 rmse_list, mae_list, mape_list, loss_list, acc_list = [], [], [], [], []
                 controller = shared_controller or DQNController(max_layers=max_layers, action_dim=action_dim, epsilon=epsilon, epsilon_min=epsilon_min, task_index=None, task_dim=TASK_CODE_DIM, state_extra_dim=2 + TASK_CODE_DIM)
-                controller.set_task_code(build_task_code(task_index, node_num, args.seq_len, args.horizon, args.tpd, arguments['adj_matrix']))
                 logger.info('DQN action mapping: %s' % DynamicNetwork.SYNAPSE_POOL)
                 num_epochs = 5
                 for i in range(len(train_loaders)):
@@ -234,6 +250,9 @@ def run_task(task_index, shared_controller=None):
                         train_loader = train_loaders[i][j]
                         val_loader = val_loaders[i][j]
                         test_loader = test_loaders[i][j]
+                        x_probe, _ = next(train_loader.get_iterator())
+                        task_code = build_task_code(task_index, x_probe, arguments['adj_matrix'])
+                        controller.set_task_code(task_code)
                         scaler = scalers[i][j]
                         input_mean = float(np.asarray(scaler.mean).mean())
                         output_std = float(np.asarray(scaler.std).mean())
@@ -261,7 +280,7 @@ def run_task(task_index, shared_controller=None):
                             state = np.full(max_layers + 2 + TASK_CODE_DIM, -1, dtype=np.float32)
                             state[:max_layers] = -1
                             state[max_layers:max_layers + 2] = state_data_stats
-                            state[max_layers + 2:] = build_task_code(task_index, node_num, args.seq_len, args.horizon, args.tpd, arguments['adj_matrix'])
+                            state[max_layers + 2:] = task_code
                             next_state = state.copy()
                             action_num = 0
                             previous_energy = 0.0
