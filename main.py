@@ -12,7 +12,7 @@ from src.base.engine import BaseEngine
 from src.base.engine_DQN import BaseEngine_DQN
 from src.utils.args import get_public_config
 from src.utils.dataloader import load_dataset_new, load_adj_from_numpy, get_dataset_info
-from src.utils.metrics import masked_mae, cross_entropy
+from src.utils.metrics import masked_mae, cross_entropy, masked_mse
 from src.utils.logging import get_logger
 from src.utils.graph_algo import normalize_adj_mx, calculate_cheb_poly
 from fastdtw import fastdtw
@@ -262,7 +262,7 @@ def run_task(task_index, shared_controller=None):
                         dataloader = {'train_loader':train_loader, 'val_loader':val_loader, 'test_loader':test_loader}
 
                         if task_index == 0:
-                            loss_fn = masked_mae
+                            loss_fn = masked_mse
                         elif task_index == 1:
                             loss_fn = cross_entropy
 
